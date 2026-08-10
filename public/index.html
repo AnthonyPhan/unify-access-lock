@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#ffffff">
+    <title>Doorstate — UniFi Access relock</title>
+    <meta name="description" content="Configure DPS-triggered relocking for UniFi Access doors.">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Doorstate home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>
+            <strong>Doorstate</strong>
+            <small>UniFi Access relock</small>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <span class="status-pill status-setup" id="status-pill">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-label">Loading</span>
+          </span>
+          <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh status" title="Refresh status">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">UniFi Access automation</p>
+            <h1>Door relock <em>automation</em></h1>
+            <p class="hero-copy">Doorstate replaces UniFi’s short native trigger with a cancellable timed rule, then ends it when DPS reports open.</p>
+          </div>
+          <aside class="live-card" aria-labelledby="live-title">
+            <div class="live-card-heading">
+              <div>
+                <p class="card-kicker">SYSTEM STATE</p>
+                <h2 id="live-title">Waiting for setup</h2>
+              </div>
+              <span class="pulse-mark" id="pulse-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <p id="runtime-message">Reading the local service configuration…</p>
+            <div class="metric-row">
+              <div><strong id="door-count">—</strong><span>doors found</span></div>
+              <div><strong id="armed-count">—</strong><span>automatic actions</span></div>
+              <div><strong id="mode-label">—</strong><span>operating mode</span></div>
+            </div>
+          </aside>
+        </section>
+
+        <form id="config-form" novalidate>
+          <div class="content-grid">
+            <div class="form-stack">
+              <section class="panel" aria-labelledby="connection-title">
+                <div class="panel-heading">
+                  <span class="step-number">01</span>
+                  <div>
+                    <h2 id="connection-title">Access connection</h2>
+                    <p>The local UniFi console and the API token created in Access.</p>
+                  </div>
+                </div>
+
+                <div class="field-grid">
+                  <label class="field field-wide">
+                    <span>Console API URL</span>
+                    <input id="unifi-access-url" name="unifiAccessUrl" type="url" inputmode="url" placeholder="https://192.168.1.1:12445" autocomplete="url" required>
+                    <small>Usually your console’s LAN address on port 12445.</small>
+                  </label>
+                  <label class="field field-wide">
+                    <span>API token <b class="saved-secret" id="token-state"></b></span>
+                    <span class="secret-input">
+                      <input id="api-token" name="apiToken" type="password" placeholder="Paste a new token" autocomplete="new-password">
+                      <button class="reveal-button" type="button" data-reveal="api-token" aria-label="Show API token">Show</button>
+                    </span>
+                    <small>Needs view/edit space and view/edit webhook permissions.</small>
+                  </label>
+                </div>
+
+                <div class="inline-setting">
+                  <div>
+                    <strong>Verify console certificate</strong>
+                    <span>Turn off only for the stock self-signed certificate on a trusted LAN.</span>
+                  </div>
+                  <label class="switch">
+                    <input id="tls-verify" name="tlsRejectUnauthorized" type="checkbox">
+                    <span aria-hidden="true"></span>
+                    <i>Toggle certificate verification</i>
+                  </label>
+                </div>
+
+                <button class="secondary-button" id="test-button" type="button">
+                  <span class="button-icon" aria-hidden="true">⌁</span>
+                  Test connection &amp; find doors
+                </button>
+              </section>
+
+              <section class="panel" aria-labelledby="callback-title">
+                <div class="panel-heading">
+                  <span class="step-number">02</span>
+                  <div>
+                    <h2 id="callback-title">Event callback</h2>
+                    <p>The address UniFi uses to deliver signed unlock and DPS events.</p>
+                  </div>
+                </div>
+
+                <label class="field">
+                  <span>Public webhook URL</span>
+                  <input id="webhook-public-url" name="webhookPublicUrl" type="url" inputmode="url" placeholder="http://192.168.1.50:8080/webhooks/unifi" required>
+                  <small>Use this Pi’s static LAN address. The console must be able to reach it.</small>
+                </label>
+
+                <div class="inline-setting compact-setting">
+                  <div>
+                    <strong>Manage webhook automatically</strong>
+                    <span>Recommended. The service creates the subscription and retrieves its signing secret.</span>
+                  </div>
+                  <label class="switch">
+                    <input id="auto-webhook" name="autoRegisterWebhook" type="checkbox" checked>
+                    <span aria-hidden="true"></span>
+                    <i>Toggle automatic webhook management</i>
+                  </label>
+                </div>
+
+                <label class="field hidden" id="webhook-secret-field">
+                  <span>Webhook signing secret <b class="saved-secret" id="webhook-secret-state"></b></span>
+                  <span class="secret-input">
+                    <input id="webhook-secret" name="webhookSecret" type="password" placeholder="Paste a new secret" autocomplete="new-password">
+                    <button class="reveal-button" type="button" data-reveal="webhook-secret" aria-label="Show webhook secret">Show</button>
+                  </span>
+                </label>
+
+                <div class="webhook-test" id="webhook-test">
+                  <div class="webhook-test-copy">
+                    <span class="webhook-test-icon" id="webhook-test-icon" aria-hidden="true">↗</span>
+                    <p>
+                      <strong id="webhook-test-title">Verify live delivery</strong>
+                      <span id="webhook-test-message">Listen for a signed event sent by your UniFi console.</span>
+                    </p>
+                  </div>
+                  <button class="secondary-button" id="webhook-test-button" type="button" disabled>
+                    Test webhook
+                  </button>
+                </div>
+              </section>
+
+              <section class="panel" aria-labelledby="behavior-title">
+                <div class="panel-heading">
+                  <span class="step-number">03</span>
+                  <div>
+                    <h2 id="behavior-title">DPS relock behavior</h2>
+                    <p>Hand off each ordinary unlock to a cancellable rule, then end it after the native trigger has expired and DPS reports open.</p>
+                  </div>
+                </div>
+
+                <div class="field-grid split-fields">
+                  <label class="field">
+                    <span>Maximum unlock time</span>
+                    <span class="unit-input">
+                      <input id="lock-timeout" name="lockTimeoutSeconds" type="number" min="1" max="3600" step="1" value="60" required>
+                      <b>seconds</b>
+                    </span>
+                    <small>Sends <code>lock_now</code> if the door never opens. The custom rule is rounded up to whole minutes as an independent fallback.</small>
+                  </label>
+                  <label class="field">
+                    <span>UniFi native trigger</span>
+                    <span class="unit-input">
+                      <input id="native-trigger" name="nativeTriggerSeconds" type="number" min="1" max="60" step="0.1" value="1" required>
+                      <b>seconds</b>
+                    </span>
+                    <small>Must match Access → Hub → Lock → Trigger Duration. Use 1 second; 0.1 seconds is too short for a reliable webhook handoff.</small>
+                  </label>
+                  <label class="field">
+                    <span>Additional lock delay</span>
+                    <span class="unit-input">
+                      <input id="open-lock-delay" name="openLockDelayMs" type="number" min="0" max="10000" step="1" value="0" required>
+                      <b>ms</b>
+                    </span>
+                    <small>Optional extra delay after both DPS is open and the native-trigger safety window has ended.</small>
+                  </label>
+                </div>
+
+                <div class="lock-api-test" id="lock-api-test">
+                  <div class="lock-api-test-heading">
+                    <span class="lock-api-test-icon" id="lock-api-test-icon" aria-hidden="true">!</span>
+                    <p>
+                      <strong id="lock-api-test-title">Test the door API directly</strong>
+                      <span id="lock-api-test-message">Set UniFi’s native trigger to 1 second, then run the complete handoff test.</span>
+                    </p>
+                  </div>
+                  <div class="lock-api-test-actions">
+                    <label>
+                      <span>Door</span>
+                      <select id="lock-test-door" disabled aria-label="Door to lock"></select>
+                    </label>
+                    <label>
+                      <span>Command</span>
+                      <select id="lock-test-command" disabled aria-label="Door command">
+                        <option value="unlock" selected>unlock — remote API unlock</option>
+                        <option value="handoff_1s">handoff_1s — complete takeover test</option>
+                        <option value="custom">custom — unlock for 1 minute</option>
+                        <option value="reset">reset — restore initial lock state</option>
+                        <option value="lock_now">lock_now — immediate lock</option>
+                        <option value="lock_early">lock_early — scheduled unlock only</option>
+                      </select>
+                    </label>
+                    <button class="secondary-button" id="lock-test-button" type="button" disabled>Send command</button>
+                  </div>
+                </div>
+
+                <div class="inline-setting safety-setting">
+                  <div>
+                    <strong>Enable automatic DPS relocking</strong>
+                    <span>When off, webhooks only update live status and the confirmed manual command test remains available.</span>
+                  </div>
+                  <label class="switch switch-caution">
+                    <input id="automation-enabled" name="automationEnabled" type="checkbox">
+                    <span aria-hidden="true"></span>
+                    <i>Toggle automatic DPS relocking</i>
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <aside class="side-stack">
+              <section class="panel doors-panel" aria-labelledby="doors-title">
+                <div class="doors-heading">
+                  <div>
+                    <p class="card-kicker">MONITORED ENTRY POINTS</p>
+                    <h2 id="doors-title">Doors</h2>
+                  </div>
+                  <div class="doors-heading-actions">
+                    <span class="live-source" id="live-dps-source"><i aria-hidden="true"></i><b>DPS offline</b></span>
+                    <button class="text-button" id="select-all-button" type="button">Select all</button>
+                  </div>
+                </div>
+                <p class="doors-help">Positions update as signed DPS events arrive. Leave every door selected to monitor the whole site.</p>
+                <div class="door-list" id="door-list" aria-live="polite">
+                  <div class="empty-state">
+                    <span aria-hidden="true">⌁</span>
+                    <strong>No doors loaded yet</strong>
+                    <p>Test the connection to retrieve doors from UniFi Access.</p>
+                  </div>
+                </div>
+              </section>
+
+              <details class="panel advanced-panel">
+                <summary>
+                  <span><b>Advanced settings</b><small>Network, validation and administrator access</small></span>
+                  <i aria-hidden="true">+</i>
+                </summary>
+                <div class="advanced-content">
+                  <label class="field">
+                    <span>Local service port</span>
+                    <input id="port" name="port" type="number" min="1" max="65535" step="1" value="8080">
+                    <small>Changing this requires a service restart.</small>
+                  </label>
+                  <label class="field">
+                    <span>Webhook path</span>
+                    <input id="webhook-path" name="webhookPath" type="text" value="/webhooks/unifi">
+                  </label>
+                  <label class="field">
+                    <span>Webhook subscription name</span>
+                    <input id="webhook-name" name="webhookName" type="text" value="unifi-access-lock">
+                  </label>
+                  <div class="field-grid split-fields">
+                    <label class="field">
+                      <span>API timeout</span>
+                      <span class="unit-input">
+                        <input id="request-timeout" name="requestTimeoutMs" type="number" min="250" max="60000" value="5000">
+                        <b>ms</b>
+                      </span>
+                    </label>
+                    <label class="field">
+                      <span>Signature window</span>
+                      <span class="unit-input">
+                        <input id="signature-tolerance" name="signatureToleranceSeconds" type="number" min="1" max="3600" value="300">
+                        <b>sec</b>
+                      </span>
+                    </label>
+                  </div>
+                  <div class="advanced-divider"></div>
+                  <p class="field-group-label">WEB ADMINISTRATOR</p>
+                  <label class="field">
+                    <span>Username</span>
+                    <input id="admin-username" name="adminUsername" type="text" value="admin" autocomplete="username">
+                  </label>
+                  <label class="field">
+                    <span>Password <b class="saved-secret" id="admin-password-state"></b></span>
+                    <span class="secret-input">
+                      <input id="admin-password" name="adminPassword" type="password" minlength="12" placeholder="At least 12 characters" autocomplete="new-password">
+                      <button class="reveal-button" type="button" data-reveal="admin-password" aria-label="Show administrator password">Show</button>
+                    </span>
+                    <small>Required before exposing this page to your LAN.</small>
+                  </label>
+                </div>
+              </details>
+
+              <div class="security-note" id="security-note">
+                <span aria-hidden="true">!</span>
+                <p><strong>Administrator password not set</strong>This setup page is currently open to your local network.</p>
+              </div>
+            </aside>
+          </div>
+
+          <div class="save-bar">
+            <div>
+              <span class="unsaved-dot" id="unsaved-dot" aria-hidden="true"></span>
+              <p><strong id="save-state">Configuration loaded</strong><span id="save-help">Changes are stored locally on this device.</span></p>
+            </div>
+            <button class="primary-button" id="save-button" type="submit">
+              <span>Save &amp; apply</span>
+              <b aria-hidden="true">→</b>
+            </button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <dialog id="login-dialog" class="login-dialog">
+      <form method="dialog" id="login-form">
+        <span class="login-mark" aria-hidden="true"><span></span></span>
+        <p class="eyebrow">ADMINISTRATOR</p>
+        <h2>Sign in to Doorstate</h2>
+        <p>Enter the local administrator credentials configured for this Raspberry Pi.</p>
+        <label class="field">
+          <span>Username</span>
+          <input id="login-username" type="text" value="admin" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="login-password" type="password" autocomplete="current-password" required>
+        </label>
+        <p class="login-error" id="login-error" role="alert"></p>
+        <button class="primary-button" type="submit"><span>Sign in</span><b aria-hidden="true">→</b></button>
+      </form>
+    </dialog>
+  </body>
+</html>

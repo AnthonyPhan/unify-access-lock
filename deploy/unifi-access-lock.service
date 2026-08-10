@@ -1,0 +1,25 @@
+[Unit]
+Description=UniFi Access DPS relock service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=unifi-access-lock
+Group=unifi-access-lock
+WorkingDirectory=/opt/unifi-access-lock
+Environment=CONFIG_PATH=/var/lib/unifi-access-lock/config.json
+Environment=SETUP_PORT=8080
+EnvironmentFile=-/etc/unifi-access-lock.env
+ExecStart=/usr/bin/node /opt/unifi-access-lock/src/index.js
+Restart=on-failure
+RestartSec=5
+StateDirectory=unifi-access-lock
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
