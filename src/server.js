@@ -16,9 +16,11 @@ function secureHeaders(contentType) {
     "content-type": contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY",
+    // Home Assistant ingress displays the UI in a same-origin frame. Keeping
+    // this at SAMEORIGIN still prevents third-party sites from embedding it.
+    "x-frame-options": "SAMEORIGIN",
     "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
   };
 }
 
@@ -52,7 +54,17 @@ async function readJson(request) {
   return parsed;
 }
 
+export function isHomeAssistantIngressRequest(request, environment = process.env) {
+  if (environment.HOME_ASSISTANT_INGRESS !== "true") return false;
+  const remoteAddress = request.socket?.remoteAddress?.replace(/^::ffff:/, "");
+  const ingressPath = request.headers?.["x-ingress-path"];
+  return remoteAddress === "172.30.32.2"
+    && typeof ingressPath === "string"
+    && ingressPath.startsWith("/api/hassio_ingress/");
+}
+
 function originAllowed(request) {
+  if (isHomeAssistantIngressRequest(request)) return true;
   const origin = request.headers.origin;
   if (!origin) return true;
   try {
@@ -63,6 +75,7 @@ function originAllowed(request) {
 }
 
 function authenticate(request, response, configManager) {
+  if (isHomeAssistantIngressRequest(request)) return true;
   const environment = configManager.environment();
   if (verifyBasicAuthorization(request.headers.authorization, environment)) return true;
 
@@ -122,10 +135,15 @@ async function handleWebhook({
 export function createServer({
   configManager,
   runtime,
+  mqttBridge,
   actualPort,
   logger,
   deduplicator = new EventDeduplicator(),
 }) {
+  const snapshot = () => ({
+    ...runtime.snapshot(),
+    homeAssistant: mqttBridge?.status?.() ?? { enabled: false, phase: "disabled" },
+  });
   return http.createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
 
@@ -150,7 +168,7 @@ export function createServer({
       }
 
       if (request.method === "GET" && url.pathname === "/healthz") {
-        const status = runtime.snapshot();
+        const status = snapshot();
         json(response, status.phase === "ready" ? 200 : 503, {
           status: status.phase,
           message: status.message,
@@ -164,7 +182,7 @@ export function createServer({
         const { error } = configManager.tryConfig();
         json(response, 200, {
           settings: configManager.publicSettings(),
-          runtime: runtime.snapshot(),
+          runtime: snapshot(),
           actualPort,
           configurationError: error,
           authenticationConfigured: configManager.authenticationConfigured(),
@@ -176,7 +194,7 @@ export function createServer({
         if (!authenticate(request, response, configManager)) return;
         const sinceValue = url.searchParams.get("since");
         if (sinceValue === null) {
-          json(response, 200, { runtime: runtime.snapshot() });
+          json(response, 200, { runtime: snapshot() });
           return;
         }
 
@@ -186,7 +204,13 @@ export function createServer({
           return;
         }
 
-        json(response, 200, { runtime: await runtime.waitForStatusChange(since) });
+        const changed = await runtime.waitForStatusChange(since);
+        json(response, 200, {
+          runtime: {
+            ...changed,
+            homeAssistant: mqttBridge?.status?.() ?? { enabled: false, phase: "disabled" },
+          },
+        });
         return;
       }
 
@@ -256,7 +280,10 @@ export function createServer({
             `Saved. Restart the service to change its listening port from ${actualPort} to ${config.server.port}.`,
           );
         } else {
-          setImmediate(() => void runtime.configure(config));
+          setImmediate(() => {
+            mqttBridge?.configure?.(config);
+            void runtime.configure(config);
+          });
         }
 
         json(response, 200, {

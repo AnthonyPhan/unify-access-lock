@@ -7,13 +7,13 @@
     <meta name="theme-color" content="#ffffff">
     <title>Doorstate — UniFi Access relock</title>
     <meta name="description" content="Configure DPS-triggered relocking for UniFi Access doors.">
-    <link rel="stylesheet" href="/styles.css">
-    <script src="/app.js" defer></script>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="Doorstate home">
+        <a class="brand" href="./" aria-label="Doorstate home">
           <span class="brand-mark" aria-hidden="true"><span></span></span>
           <span>
             <strong>Doorstate</strong>
@@ -113,7 +113,7 @@
                 <label class="field">
                   <span>Public webhook URL</span>
                   <input id="webhook-public-url" name="webhookPublicUrl" type="url" inputmode="url" placeholder="http://192.168.1.50:8080/webhooks/unifi" required>
-                  <small>Use this Pi’s static LAN address. The console must be able to reach it.</small>
+                  <small>Use this host’s static LAN address. The console must be able to reach it.</small>
                 </label>
 
                 <div class="inline-setting compact-setting">
@@ -223,6 +223,79 @@
                     <input id="automation-enabled" name="automationEnabled" type="checkbox">
                     <span aria-hidden="true"></span>
                     <i>Toggle automatic DPS relocking</i>
+                  </label>
+                </div>
+              </section>
+
+              <section class="panel" aria-labelledby="home-assistant-title">
+                <div class="panel-heading">
+                  <span class="step-number">04</span>
+                  <div>
+                    <h2 id="home-assistant-title">Home Assistant</h2>
+                    <p>Publish each door as native Home Assistant entities through MQTT discovery.</p>
+                  </div>
+                </div>
+
+                <div class="webhook-test mqtt-status" id="mqtt-status">
+                  <div class="webhook-test-copy">
+                    <span class="webhook-test-icon" id="mqtt-status-icon" aria-hidden="true">⌁</span>
+                    <p>
+                      <strong id="mqtt-status-title">MQTT disabled</strong>
+                      <span id="mqtt-status-message">Enable MQTT discovery to create native Home Assistant devices.</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="inline-setting compact-setting">
+                  <div>
+                    <strong>Publish Home Assistant entities</strong>
+                    <span>The Home Assistant app automatically uses the Supervisor MQTT service when available.</span>
+                  </div>
+                  <label class="switch">
+                    <input id="mqtt-enabled" name="mqttEnabled" type="checkbox">
+                    <span aria-hidden="true"></span>
+                    <i>Toggle Home Assistant MQTT discovery</i>
+                  </label>
+                </div>
+
+                <div class="field-grid">
+                  <label class="field field-wide">
+                    <span>Manual MQTT broker URL</span>
+                    <input id="mqtt-broker-url" name="mqttBrokerUrl" type="text" inputmode="url" placeholder="mqtt://192.168.1.50:1883">
+                    <small>Optional inside Home Assistant. A manual value overrides the Supervisor-provided broker.</small>
+                  </label>
+                  <label class="field">
+                    <span>MQTT username</span>
+                    <input id="mqtt-username" name="mqttUsername" type="text" autocomplete="username">
+                  </label>
+                  <label class="field">
+                    <span>MQTT password <b class="saved-secret" id="mqtt-password-state"></b></span>
+                    <span class="secret-input">
+                      <input id="mqtt-password" name="mqttPassword" type="password" placeholder="Paste a new password" autocomplete="new-password">
+                      <button class="reveal-button" type="button" data-reveal="mqtt-password" aria-label="Show MQTT password">Show</button>
+                    </span>
+                  </label>
+                  <label class="field">
+                    <span>Discovery prefix</span>
+                    <input id="mqtt-discovery-prefix" name="mqttDiscoveryPrefix" type="text" value="homeassistant">
+                    <small>Must match the MQTT integration’s discovery prefix.</small>
+                  </label>
+                  <label class="field">
+                    <span>Topic prefix</span>
+                    <input id="mqtt-topic-prefix" name="mqttTopicPrefix" type="text" value="doorstate">
+                    <small>Use a unique prefix if multiple Doorstate instances share one broker.</small>
+                  </label>
+                </div>
+
+                <div class="inline-setting safety-setting">
+                  <div>
+                    <strong>Allow unlock from Home Assistant</strong>
+                    <span>Creates a lock entity capable of remote unlock. Lock-now buttons and status entities remain available when this is off.</span>
+                  </div>
+                  <label class="switch switch-caution">
+                    <input id="mqtt-allow-unlock" name="mqttAllowUnlock" type="checkbox">
+                    <span aria-hidden="true"></span>
+                    <i>Toggle Home Assistant remote unlock</i>
                   </label>
                 </div>
               </section>

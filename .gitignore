@@ -1,6 +1,11 @@
 .env
 data/
 node_modules/
+dist/
 npm-debug.log*
 coverage/
 *.log
+/deploy/.env
+/deploy/mosquitto/config/passwd
+/deploy/mosquitto/data/
+/sample_people_20000.csv

@@ -44,6 +44,7 @@ export class DoorController {
     clearTimer = clearTimeout,
     sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     now = Date.now,
+    onStateChange = () => {},
   }) {
     this.client = client;
     this.monitoredDoorIds = monitoredDoorIds;
@@ -60,6 +61,7 @@ export class DoorController {
     this.clearTimer = clearTimer;
     this.sleep = sleep;
     this.now = now;
+    this.onStateChange = onStateChange;
     this.states = new Map();
     this.suspendedDoors = new Set();
     this.lastPositions = new Map();
@@ -216,6 +218,7 @@ export class DoorController {
     );
     state.timeoutTimer?.unref?.();
     this.states.set(door.id, state);
+    this.notifyState({ doorId: door.id, relay: "unlock" });
 
     this.logger.info("Door unlock handed off to a cancellable custom rule", {
       doorId: door.id,
@@ -246,6 +249,7 @@ export class DoorController {
       if (!state.locking && !state.lockTimer) {
         this.scheduleLock(state, "opened", this.openLockDelay(state));
       }
+      this.notifyState({ doorId: door.id });
     }
   }
 
@@ -265,6 +269,7 @@ export class DoorController {
     if (value) {
       for (const doorId of [...this.states.keys()]) this.disarm(doorId);
     }
+    this.notifyState({ emergencyActive: value });
     this.logger.warn(value ? "Door automation suspended for UniFi emergency mode" : "Door automation resumed after UniFi emergency mode", {
       mode: event?.data?.object?.mode,
     });
@@ -291,6 +296,7 @@ export class DoorController {
     let current = this.states.get(state.doorId);
     if (current?.generation !== state.generation || current.locking) return;
     current.locking = true;
+    this.notifyState({ doorId: state.doorId });
 
     const retryDelays = [0, 250, 1_000, 3_000];
     let lastError;
@@ -317,6 +323,7 @@ export class DoorController {
           reason,
         });
         this.disarm(state.doorId, state.generation);
+        this.notifyState({ doorId: state.doorId, ...(!this.dryRun ? { relay: "lock" } : {}) });
         return;
       } catch (error) {
         lastError = error;
@@ -330,6 +337,15 @@ export class DoorController {
       error: lastError?.message,
     });
     this.disarm(state.doorId, state.generation);
+    this.notifyState({ doorId: state.doorId });
+  }
+
+  notifyState(change) {
+    try {
+      this.onStateChange(change);
+    } catch (error) {
+      this.logger.warn("Door state observer failed", { doorId: change.doorId, error: error.message });
+    }
   }
 
   disarm(doorId, generation) {

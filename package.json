@@ -1,15 +1,25 @@
 {
   "name": "unifi-access-lock",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "DPS-aware UniFi Access relocking with a local Raspberry Pi configuration UI.",
+  "description": "DPS-aware UniFi Access relocking with Home Assistant MQTT discovery.",
   "type": "module",
   "engines": {
     "node": ">=18.17"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "test": "node --test",
-    "check": "node --check src/*.js && node --check public/app.js && node --test"
+    "build": "tsc -p tsconfig.build.json",
+    "start": "npm run build --silent && node dist/index.js",
+    "test": "node --import tsx --test",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check src/*.js && node --check public/app.js && tsc --noEmit && node --import tsx --test"
+  },
+  "dependencies": {
+    "mqtt": "^5.15.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
   }
 }

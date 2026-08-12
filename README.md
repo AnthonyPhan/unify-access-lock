@@ -1,6 +1,8 @@
 # UniFi Access DPS-aware relock
 
-This Raspberry Pi-friendly Node.js service keeps a UniFi Access door unlocked until it is opened, then relocks it immediately. It also shows live door position sensor (DPS) state and provides explicitly confirmed API command tests.
+This TypeScript-enabled Node.js service keeps a UniFi Access door unlocked until it is opened, then relocks it immediately. It also shows live door position sensor (DPS) state, publishes native Home Assistant devices through MQTT discovery, and provides explicitly confirmed API command tests.
+
+It can run either as a standalone Node service or as a local Home Assistant app/add-on. The Home Assistant package uses the same controller and configuration UI rather than maintaining a second implementation.
 
 It uses the official local UniFi Access API and signed webhooks. Configure the hub's native Lock Trigger Duration to **1 second**. Doorstate replaces that short native trigger with a cancellable custom unlock rule; do not use 0.1 seconds because it leaves too little time for webhook delivery and the takeover API call.
 
@@ -16,7 +18,7 @@ Unlock schedules, leave-unlocked rules, emergency evacuation, and lockdown remai
 
 ## Requirements
 
-- Node.js 18.17 or newer. There are no runtime npm dependencies.
+- Node.js 18.17 or newer.
 - A current UniFi Access release. The official docs list Access 1.24.6+ for door locking rules and 2.2.10+ for webhooks.
 - A wired and correctly configured DPS for every monitored door.
 - A static IP or resolvable hostname for the Pi that the UniFi console can reach.
@@ -101,6 +103,36 @@ Health is available at:
 ```sh
 curl http://127.0.0.1:8080/healthz
 ```
+
+## Home Assistant app/add-on
+
+Home Assistant OS and Home Assistant Supervised users can run this repository as a local app:
+
+1. Copy or clone the repository to `/addons/doorstate` on the Home Assistant host.
+2. Reload **Settings → Apps → App store**.
+3. Install **Doorstate** from **Local apps**, start it, and select **Open Web UI**.
+4. Configure the UniFi webhook as `http://<home-assistant-host>:8080/webhooks/unifi`; do not use the authenticated ingress URL as the webhook destination.
+
+The app requests Home Assistant's MQTT service and automatically receives its broker credentials from Supervisor. Once **Publish Home Assistant entities** is enabled, Doorstate creates native devices containing DPS, relay, relock-state, diagnostic, lock-now and configuration entities. Remote unlock remains disabled until separately opted in.
+
+MQTT mirrors state and carries user commands only. The safety-critical UniFi webhook → Doorstate controller → UniFi API path does not pass through Home Assistant or MQTT, so broker or Core restarts do not interrupt automatic relocking.
+
+The UI is available through Home Assistant ingress, while the mapped port remains available for signed webhook delivery from the UniFi console. Configuration is persisted in the Home Assistant app data volume. See [DOCS.md](DOCS.md) for complete installation, entity and security details.
+
+## Home Assistant Container with Docker Compose
+
+For Home Assistant Container on a general-purpose Linux host, the source-controlled deployment in `deploy/compose.yaml` runs Doorstate and a private Mosquitto broker alongside Home Assistant. Mosquitto is bound to host loopback only; Home Assistant reaches it at `127.0.0.1:1883`, while Doorstate reaches it over the private Compose network.
+
+```sh
+git clone https://github.com/AnthonyPhan/unify-access-lock.git
+cd unify-access-lock/deploy
+./setup-mqtt.sh
+docker compose up -d --build
+```
+
+Then add the MQTT integration in Home Assistant using broker `127.0.0.1`, port `1883`, and the `HOME_ASSISTANT_MQTT_*` credentials in `deploy/.env`. MQTT discovery is enabled by default. Open Doorstate at `http://<host>:8080`, complete UniFi setup, enable **Publish Home Assistant entities**, and save.
+
+The generated `.env`, Mosquitto password database, broker data, and Doorstate runtime configuration are excluded from Git. The public repository contains only deployment definitions and examples.
 
 ## Raspberry Pi systemd install
 

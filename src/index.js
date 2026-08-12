@@ -5,6 +5,7 @@ import { loadEnvFile } from "./env.js";
 import { logger } from "./logger.js";
 import { RuntimeManager } from "./runtime-manager.js";
 import { createServer } from "./server.js";
+import { HomeAssistantMqttBridge } from "./home-assistant-mqtt.ts";
 
 function setupPort(environment) {
   const value = Number(environment.SETUP_PORT || environment.PORT || 8_080);
@@ -20,7 +21,22 @@ async function main() {
   const initial = configManager.tryConfig();
   const actualPort = initial.config?.server.port ?? setupPort(process.env);
   const runtime = new RuntimeManager({ logger });
-  const server = createServer({ configManager, runtime, actualPort, logger });
+  let mqttBridge;
+  mqttBridge = new HomeAssistantMqttBridge({
+    logger,
+    getRuntimeSnapshot: () => runtime.snapshot(),
+    onDoorCommand: (doorId, command) => runtime.commandDoor(doorId, command),
+    onOperationalChange: async (changes) => {
+      const { config } = await configManager.updateOperationalSettings(changes);
+      mqttBridge.configure(config);
+      await runtime.configure(config);
+    },
+    onStatusChange: () => runtime.notifyStatus(),
+  });
+  runtime.subscribeStatus((snapshot) => mqttBridge.update(snapshot));
+  if (initial.config) mqttBridge.configure(initial.config);
+
+  const server = createServer({ configManager, runtime, mqttBridge, actualPort, logger });
 
   await new Promise((resolveListening, reject) => {
     server.once("error", reject);
@@ -41,6 +57,7 @@ async function main() {
   const shutdown = (signal) => {
     logger.info("Shutting down", { signal });
     runtime.stop();
+    mqttBridge.stop();
     server.close((error) => {
       if (error) {
         logger.error("HTTP server shutdown failed", { error: error.message });

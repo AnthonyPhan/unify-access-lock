@@ -44,6 +44,80 @@ function csvSet(raw = "") {
   return new Set(raw.split(",").map((value) => value.trim()).filter(Boolean));
 }
 
+function mqttTopicPrefix(raw, fallback, key) {
+  const value = raw?.trim() || fallback;
+  if (!/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(value)) {
+    throw new Error(`${key} may contain only letters, numbers, underscores, hyphens and path separators`);
+  }
+  return value;
+}
+
+function mqttUrl(environment) {
+  const manual = environment.HA_MQTT_MANUAL_URL?.trim();
+  const automatic = environment.HA_MQTT_URL?.trim();
+  const raw = manual || automatic;
+  if (!raw) return undefined;
+  const withProtocol = /^[a-z]+:\/\//i.test(raw) ? raw : `mqtt://${raw}`;
+  const url = new URL(withProtocol);
+  if (!["mqtt:", "mqtts:", "ws:", "wss:"].includes(url.protocol)) {
+    throw new Error("HA_MQTT_MANUAL_URL must use mqtt, mqtts, ws or wss");
+  }
+  return url;
+}
+
+function readMqttConfig(environment) {
+  const requested = boolean(
+    environment,
+    "HA_MQTT_ENABLED",
+    Boolean(environment.HA_MQTT_MANUAL_URL?.trim() || environment.HA_MQTT_URL?.trim()),
+  );
+  const common = {
+    discoveryPrefix: "homeassistant",
+    topicPrefix: "doorstate",
+    allowUnlock: boolean(environment, "HA_MQTT_ALLOW_UNLOCK", false),
+    source: environment.HA_MQTT_MANUAL_URL?.trim()
+      ? "manual"
+      : environment.HA_MQTT_SOURCE?.trim()
+        || (environment.HA_MQTT_URL?.trim() ? "environment" : "unconfigured"),
+  };
+
+  try {
+    const url = mqttUrl(environment);
+    const discoveryPrefix = mqttTopicPrefix(
+      environment.HA_MQTT_DISCOVERY_PREFIX,
+      "homeassistant",
+      "HA_MQTT_DISCOVERY_PREFIX",
+    );
+    const topicPrefix = mqttTopicPrefix(
+      environment.HA_MQTT_TOPIC_PREFIX,
+      "doorstate",
+      "HA_MQTT_TOPIC_PREFIX",
+    );
+    if (requested && !url) {
+      return { ...common, enabled: true, discoveryPrefix, topicPrefix, error: "An MQTT broker URL is required" };
+    }
+    return {
+      ...common,
+      enabled: requested,
+      url,
+      username: environment.HA_MQTT_MANUAL_USERNAME?.trim()
+        || environment.HA_MQTT_USERNAME?.trim()
+        || undefined,
+      password: environment.HA_MQTT_MANUAL_PASSWORD
+        || environment.HA_MQTT_PASSWORD
+        || undefined,
+      discoveryPrefix,
+      topicPrefix,
+    };
+  } catch (error) {
+    return {
+      ...common,
+      enabled: requested,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function readConfig(environment = process.env) {
   const autoRegisterWebhook = boolean(environment, "AUTO_REGISTER_WEBHOOK", true);
   const webhookPublicUrl = environment.WEBHOOK_PUBLIC_URL?.trim() || undefined;
@@ -111,5 +185,6 @@ export function readConfig(environment = process.env) {
       automationEnabled: automationRequested && !dryRun,
       dryRun,
     },
+    mqtt: readMqttConfig(environment),
   };
 }

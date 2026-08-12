@@ -123,6 +123,8 @@ test("a DPS webhook updates the live door position and wakes status listeners", 
     position: "open",
     hasDps: true,
     lastDpsAt: now,
+    lastEventAt: now,
+    lastEvent: "access.device.dps_status",
   });
 });
 

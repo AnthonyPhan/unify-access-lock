@@ -1,0 +1,2 @@
+network:
+  8080/tcp: Doorstate UI and UniFi webhook receiver

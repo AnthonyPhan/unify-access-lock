@@ -26,6 +26,12 @@ const elements = {
   lockTestCommand: document.querySelector("#lock-test-command"),
   lockTestButton: document.querySelector("#lock-test-button"),
   automationEnabled: document.querySelector("#automation-enabled"),
+  mqttEnabled: document.querySelector("#mqtt-enabled"),
+  mqttPasswordState: document.querySelector("#mqtt-password-state"),
+  mqttStatus: document.querySelector("#mqtt-status"),
+  mqttStatusIcon: document.querySelector("#mqtt-status-icon"),
+  mqttStatusTitle: document.querySelector("#mqtt-status-title"),
+  mqttStatusMessage: document.querySelector("#mqtt-status-message"),
   autoWebhook: document.querySelector("#auto-webhook"),
   securityNote: document.querySelector("#security-note"),
   testButton: document.querySelector("#test-button"),
@@ -66,10 +72,18 @@ function basicAuthorization(username, password) {
   return `Basic ${btoa(binary)}`;
 }
 
+function localUrl(path) {
+  const base = new URL(window.location.href);
+  base.search = "";
+  base.hash = "";
+  if (!base.pathname.endsWith("/")) base.pathname += "/";
+  return new URL(path.replace(/^\/+/, ""), base);
+}
+
 async function api(path, options = {}, allowLogin = true) {
   const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
   if (state.authorization) headers.authorization = state.authorization;
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(localUrl(path), { ...options, headers });
 
   if (response.status === 401 && allowLogin) {
     state.retryAfterLogin = () => api(path, options, false);
@@ -163,6 +177,12 @@ function populate(settings) {
   setValue("lock-timeout", settings.lockTimeoutSeconds);
   setValue("native-trigger", settings.nativeTriggerSeconds ?? 1);
   setValue("open-lock-delay", settings.openLockDelayMs ?? settings.closeDebounceMs ?? 0);
+  setValue("mqtt-enabled", settings.mqttEnabled);
+  setValue("mqtt-broker-url", settings.mqttBrokerUrl);
+  setValue("mqtt-username", settings.mqttUsername);
+  setValue("mqtt-discovery-prefix", settings.mqttDiscoveryPrefix || "homeassistant");
+  setValue("mqtt-topic-prefix", settings.mqttTopicPrefix || "doorstate");
+  setValue("mqtt-allow-unlock", settings.mqttAllowUnlock);
   setValue("port", settings.port);
   setValue("webhook-path", settings.webhookPath);
   setValue("webhook-name", settings.webhookName);
@@ -173,6 +193,7 @@ function populate(settings) {
   elements.tokenState.textContent = settings.apiTokenConfigured ? "saved" : "required";
   elements.webhookSecretState.textContent = settings.webhookSecretConfigured ? "saved" : "required";
   elements.adminPasswordState.textContent = settings.adminPasswordConfigured ? "saved" : "recommended";
+  elements.mqttPasswordState.textContent = settings.mqttPasswordConfigured ? "saved" : "optional";
   elements.webhookSecretField.classList.toggle("hidden", settings.autoRegisterWebhook);
 
   elements.securityNote.classList.toggle("secured", settings.adminPasswordConfigured);
@@ -180,6 +201,7 @@ function populate(settings) {
     ? '<span aria-hidden="true">✓</span><p><strong>Administrator access protected</strong>Configuration APIs require your local sign-in.</p>'
     : '<span aria-hidden="true">!</span><p><strong>Administrator password not set</strong>This setup page is currently open to your local network.</p>';
   updateAutomationFields();
+  updateMqttFields();
   markDirty(false);
 }
 
@@ -188,6 +210,16 @@ function updateAutomationFields() {
   document.querySelector("#lock-timeout").disabled = disabled;
   document.querySelector("#native-trigger").disabled = disabled;
   document.querySelector("#open-lock-delay").disabled = disabled;
+}
+
+function updateMqttFields() {
+  const disabled = !elements.mqttEnabled.checked;
+  document.querySelector("#mqtt-broker-url").disabled = disabled;
+  document.querySelector("#mqtt-username").disabled = disabled;
+  document.querySelector("#mqtt-password").disabled = disabled;
+  document.querySelector("#mqtt-discovery-prefix").disabled = disabled;
+  document.querySelector("#mqtt-topic-prefix").disabled = disabled;
+  document.querySelector("#mqtt-allow-unlock").disabled = disabled;
 }
 
 function suggestedWebhookUrl() {
@@ -232,6 +264,29 @@ function updateRuntime(runtime) {
           : "Standby";
   elements.liveDpsSource.classList.toggle("active", phase === "ready");
   elements.liveDpsSource.querySelector("b").textContent = phase === "ready" ? "Live DPS" : "DPS offline";
+
+  const homeAssistant = runtime?.homeAssistant || { enabled: false, phase: "disabled" };
+  elements.mqttStatus.classList.remove("success", "failed", "waiting");
+  if (!homeAssistant.enabled || homeAssistant.phase === "disabled") {
+    elements.mqttStatusTitle.textContent = "MQTT disabled";
+    elements.mqttStatusMessage.textContent = "Enable MQTT discovery to create native Home Assistant devices.";
+    elements.mqttStatusIcon.textContent = "⌁";
+  } else if (homeAssistant.phase === "connected") {
+    elements.mqttStatus.classList.add("success");
+    elements.mqttStatusTitle.textContent = "Home Assistant connected";
+    elements.mqttStatusMessage.textContent = `${homeAssistant.source || "MQTT"} broker ${homeAssistant.broker || "connected"}; native entities are published.`;
+    elements.mqttStatusIcon.textContent = "✓";
+  } else if (homeAssistant.phase === "error") {
+    elements.mqttStatus.classList.add("failed");
+    elements.mqttStatusTitle.textContent = "MQTT connection failed";
+    elements.mqttStatusMessage.textContent = homeAssistant.error || "Check the broker URL and credentials.";
+    elements.mqttStatusIcon.textContent = "!";
+  } else {
+    elements.mqttStatus.classList.add("waiting");
+    elements.mqttStatusTitle.textContent = homeAssistant.phase === "connecting" ? "Connecting to MQTT" : "MQTT offline";
+    elements.mqttStatusMessage.textContent = "Door automation remains active independently while MQTT reconnects.";
+    elements.mqttStatusIcon.textContent = "…";
+  }
 
   if (runtime?.doors) {
     if (state.dirty && state.doors.length) {
@@ -488,6 +543,13 @@ function formPayload() {
     lockTimeoutSeconds: Number(document.querySelector("#lock-timeout").value),
     nativeTriggerSeconds: Number(document.querySelector("#native-trigger").value),
     openLockDelayMs: Number(document.querySelector("#open-lock-delay").value),
+    mqttEnabled: elements.mqttEnabled.checked,
+    mqttBrokerUrl: document.querySelector("#mqtt-broker-url").value,
+    mqttUsername: document.querySelector("#mqtt-username").value,
+    mqttPassword: document.querySelector("#mqtt-password").value,
+    mqttDiscoveryPrefix: document.querySelector("#mqtt-discovery-prefix").value,
+    mqttTopicPrefix: document.querySelector("#mqtt-topic-prefix").value,
+    mqttAllowUnlock: document.querySelector("#mqtt-allow-unlock").checked,
     signatureToleranceSeconds: Number(document.querySelector("#signature-tolerance").value),
     port: Number(document.querySelector("#port").value),
     adminUsername: document.querySelector("#admin-username").value,
@@ -579,6 +641,7 @@ async function saveConfiguration(event) {
     }
     document.querySelector("#api-token").value = "";
     document.querySelector("#webhook-secret").value = "";
+    document.querySelector("#mqtt-password").value = "";
     populate(result.settings);
     toast(result.message);
     if (!result.restartRequired) {
@@ -609,6 +672,7 @@ elements.autoWebhook.addEventListener("change", () => {
   elements.webhookSecretField.classList.toggle("hidden", elements.autoWebhook.checked);
 });
 elements.automationEnabled.addEventListener("change", updateAutomationFields);
+elements.mqttEnabled.addEventListener("change", updateMqttFields);
 elements.selectAllButton.addEventListener("click", () => {
   const checkboxes = [...elements.doorList.querySelectorAll('input[type="checkbox"]')];
   for (const checkbox of checkboxes) checkbox.checked = true;

@@ -20,6 +20,13 @@ const RUNTIME_KEYS = [
   "WEBHOOK_SIGNATURE_TOLERANCE_SECONDS",
   "PORT",
   "DRY_RUN",
+  "HA_MQTT_ENABLED",
+  "HA_MQTT_MANUAL_URL",
+  "HA_MQTT_MANUAL_USERNAME",
+  "HA_MQTT_MANUAL_PASSWORD",
+  "HA_MQTT_DISCOVERY_PREFIX",
+  "HA_MQTT_TOPIC_PREFIX",
+  "HA_MQTT_ALLOW_UNLOCK",
 ];
 
 function boolString(value) {
@@ -111,6 +118,21 @@ export class ConfigManager {
       ),
       port: effectiveNumber(environment.PORT, 8_080),
       dryRun: effectiveBoolean(environment.DRY_RUN, false),
+      mqttEnabled: effectiveBoolean(
+        environment.HA_MQTT_ENABLED,
+        Boolean(environment.HA_MQTT_MANUAL_URL || environment.HA_MQTT_URL),
+      ),
+      mqttBrokerUrl: environment.HA_MQTT_MANUAL_URL || "",
+      mqttUsername: environment.HA_MQTT_MANUAL_USERNAME || "",
+      mqttPasswordConfigured: Boolean(
+        environment.HA_MQTT_MANUAL_PASSWORD || environment.HA_MQTT_PASSWORD,
+      ),
+      mqttDiscoveryPrefix: environment.HA_MQTT_DISCOVERY_PREFIX || "homeassistant",
+      mqttTopicPrefix: environment.HA_MQTT_TOPIC_PREFIX || "doorstate",
+      mqttAllowUnlock: effectiveBoolean(environment.HA_MQTT_ALLOW_UNLOCK, false),
+      mqttSource: environment.HA_MQTT_MANUAL_URL
+        ? "manual"
+        : environment.HA_MQTT_SOURCE || (environment.HA_MQTT_URL ? "environment" : "unconfigured"),
       adminUsername: environment.ADMIN_USERNAME || "admin",
       adminPasswordConfigured: isAdminAuthenticationConfigured(environment),
     };
@@ -161,8 +183,38 @@ export class ConfigManager {
     // Preserve DRY_RUN as a headless safety override while the web UI exposes
     // one unambiguous automatic-relocking switch.
     environment.DRY_RUN = boolString(!Boolean(body.automationEnabled));
+    environment.HA_MQTT_ENABLED = boolString(Boolean(body.mqttEnabled));
+    environment.HA_MQTT_MANUAL_URL = bodyString(body, "mqttBrokerUrl");
+    environment.HA_MQTT_MANUAL_USERNAME = bodyString(body, "mqttUsername");
+    if (bodyString(body, "mqttPassword")) {
+      environment.HA_MQTT_MANUAL_PASSWORD = bodyString(body, "mqttPassword");
+    }
+    environment.HA_MQTT_DISCOVERY_PREFIX = bodyString(
+      body,
+      "mqttDiscoveryPrefix",
+      "homeassistant",
+    );
+    environment.HA_MQTT_TOPIC_PREFIX = bodyString(body, "mqttTopicPrefix", "doorstate");
+    environment.HA_MQTT_ALLOW_UNLOCK = boolString(Boolean(body.mqttAllowUnlock));
 
     return { environment, config: readConfig(environment) };
+  }
+
+  async updateOperationalSettings(changes) {
+    const allowed = new Set(["automationEnabled", "lockTimeoutSeconds", "openLockDelayMs"]);
+    for (const key of Object.keys(changes)) {
+      if (!allowed.has(key)) throw new Error(`MQTT cannot update ${key}`);
+    }
+
+    const settings = this.publicSettings();
+    return this.save({
+      ...settings,
+      apiToken: "",
+      webhookSecret: "",
+      mqttPassword: "",
+      adminPassword: "",
+      ...changes,
+    });
   }
 
   async save(body) {

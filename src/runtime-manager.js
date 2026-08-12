@@ -34,6 +34,7 @@ export class RuntimeManager {
     this.webhookTests = new Map();
     this.statusRevision = 0;
     this.statusWaiters = new Set();
+    this.statusListeners = new Set();
     this.status = {
       phase: "setup",
       message: "Configuration is required",
@@ -125,6 +126,7 @@ export class RuntimeManager {
         emergencyActive: Boolean(emergencyStatus?.evacuation || emergencyStatus?.lockdown),
         logger: this.logger,
         now: this.now,
+        onStateChange: (change) => this.recordControllerState(change),
       });
 
       this.controller = controller;
@@ -136,6 +138,7 @@ export class RuntimeManager {
         name: door.name,
         fullName: door.full_name,
         position: door.door_position_status,
+        relay: door.door_lock_relay_status,
         hasDps: door.door_position_status != null,
         lastDpsAt: undefined,
       }));
@@ -172,6 +175,19 @@ export class RuntimeManager {
 
   markRestartRequired(message) {
     this.status = { ...this.status, phase: "restart-required", message };
+    this.publishStatus();
+  }
+
+  recordControllerState(change) {
+    this.status = {
+      ...this.status,
+      ...(typeof change.emergencyActive === "boolean"
+        ? { emergencyActive: change.emergencyActive }
+        : {}),
+      doors: (this.status.doors ?? []).map((door) => door.id === change.doorId
+        ? { ...door, ...(change.relay ? { relay: change.relay } : {}) }
+        : door),
+    };
     this.publishStatus();
   }
 
@@ -287,6 +303,29 @@ export class RuntimeManager {
     };
   }
 
+  async commandDoor(doorId, command) {
+    if (command !== "unlock" && command !== "lock") {
+      throw new Error("Home Assistant may only request lock or unlock");
+    }
+    const result = await this.testDoorCommand(
+      doorId,
+      command === "lock" ? "lock_now" : "unlock",
+    );
+    this.status = {
+      ...this.status,
+      doors: (this.status.doors ?? []).map((door) => door.id === doorId
+        ? {
+            ...door,
+            relay: result.afterRelay,
+            position: result.afterPosition,
+            lastCommandAt: this.now(),
+          }
+        : door),
+    };
+    this.publishStatus();
+    return result;
+  }
+
   async startWebhookTest() {
     if (this.status.phase !== "ready" || !this.client || !this.activeConfig || !this.webhookSecret) {
       throw new Error("Save and apply a working configuration before testing webhook delivery");
@@ -350,11 +389,31 @@ export class RuntimeManager {
       test.doorName = event?.data?.location?.name ?? event?.data?.device?.alias;
     }
 
-    if (event?.event !== "access.device.dps_status") return;
-    const position = event?.data?.object?.status;
-    if (position !== "open" && position !== "close") return;
-
     const doorId = event?.data?.location?.id ?? event?.data?.device?.location_id;
+    this.status = {
+      ...this.status,
+      lastWebhookAt: receivedAt,
+      lastWebhookEvent: event?.event,
+      doors: (this.status.doors ?? []).map((door) => door.id === doorId
+        ? {
+            ...door,
+            lastEventAt: receivedAt,
+            lastEvent: event?.event,
+            ...(event?.event === "access.door.unlock" ? { relay: "unlock" } : {}),
+          }
+        : door),
+    };
+
+    if (event?.event !== "access.device.dps_status") {
+      this.publishStatus();
+      return;
+    }
+    const position = event?.data?.object?.status;
+    if (position !== "open" && position !== "close") {
+      this.publishStatus();
+      return;
+    }
+
     let found = false;
     const doors = (this.status.doors ?? []).map((door) => {
       if (door.id !== doorId) return door;
@@ -364,6 +423,8 @@ export class RuntimeManager {
         position,
         hasDps: true,
         lastDpsAt: receivedAt,
+        lastEventAt: receivedAt,
+        lastEvent: event?.event,
       };
     });
 
@@ -415,6 +476,24 @@ export class RuntimeManager {
   publishStatus() {
     this.statusRevision += 1;
     for (const waiter of [...this.statusWaiters]) waiter.resolve();
+    const snapshot = this.snapshot();
+    for (const listener of [...this.statusListeners]) {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        this.logger.warn("Status listener failed", { error: error.message });
+      }
+    }
+  }
+
+  subscribeStatus(listener) {
+    this.statusListeners.add(listener);
+    listener(this.snapshot());
+    return () => this.statusListeners.delete(listener);
+  }
+
+  notifyStatus() {
+    this.publishStatus();
   }
 
   stopController() {
@@ -429,5 +508,6 @@ export class RuntimeManager {
     this.generation += 1;
     this.stopController();
     this.publishStatus();
+    this.statusListeners.clear();
   }
 }

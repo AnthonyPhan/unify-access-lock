@@ -27,6 +27,13 @@ function form(overrides = {}) {
     dryRun: true,
     adminUsername: "admin",
     adminPassword: "a-long-test-password",
+    mqttEnabled: false,
+    mqttBrokerUrl: "",
+    mqttUsername: "",
+    mqttPassword: "",
+    mqttDiscoveryPrefix: "homeassistant",
+    mqttTopicPrefix: "doorstate",
+    mqttAllowUnlock: false,
     ...overrides,
   };
 }
@@ -117,4 +124,66 @@ test("changing an authenticated username also requires a new password", async (c
     manager.save(form({ adminUsername: "operator", adminPassword: "", apiToken: "" })),
     /Enter a new administrator password/,
   );
+});
+
+test("persists manual MQTT settings while redacting the broker password", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "unifi-access-lock-test-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const manager = new ConfigManager({
+    store: new ConfigStore(join(directory, "config.json")),
+    baseEnvironment: {},
+  });
+  await manager.load();
+  await manager.save(form({
+    mqttEnabled: true,
+    mqttBrokerUrl: "mqtt://192.0.2.30:1883",
+    mqttUsername: "doorstate",
+    mqttPassword: "test-mqtt-password",
+    mqttAllowUnlock: true,
+  }));
+
+  const settings = manager.publicSettings();
+  assert.equal(settings.mqttEnabled, true);
+  assert.equal(settings.mqttPasswordConfigured, true);
+  assert.equal(settings.mqttAllowUnlock, true);
+  assert.equal("mqttPassword" in settings, false);
+  assert.equal(manager.tryConfig().config.mqtt.url.href, "mqtt://192.0.2.30:1883");
+  assert.equal(manager.environment().HA_MQTT_MANUAL_PASSWORD, "test-mqtt-password");
+});
+
+test("uses Supervisor MQTT credentials without copying them into persisted configuration", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "unifi-access-lock-test-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "config.json");
+  const manager = new ConfigManager({
+    store: new ConfigStore(path),
+    baseEnvironment: {
+      HA_MQTT_URL: "mqtt://core-mosquitto:1883",
+      HA_MQTT_USERNAME: "supervisor-user",
+      HA_MQTT_PASSWORD: "supervisor-password",
+      HA_MQTT_SOURCE: "supervisor",
+    },
+  });
+  await manager.load();
+  await manager.save(form({ mqttEnabled: true }));
+
+  assert.equal(manager.publicSettings().mqttSource, "supervisor");
+  assert.equal(manager.tryConfig().config.mqtt.username, "supervisor-user");
+  const stored = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(stored.HA_MQTT_USERNAME, undefined);
+  assert.equal(stored.HA_MQTT_PASSWORD, undefined);
+});
+
+test("an unavailable MQTT broker does not prevent the UniFi controller configuration", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "unifi-access-lock-test-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const manager = new ConfigManager({
+    store: new ConfigStore(join(directory, "config.json")),
+    baseEnvironment: {},
+  });
+  await manager.load();
+  const saved = await manager.save(form({ mqttEnabled: true, mqttBrokerUrl: "" }));
+  assert.equal(saved.config.doors.lockTimeoutMs, 60_000);
+  assert.equal(saved.config.mqtt.enabled, true);
+  assert.match(saved.config.mqtt.error, /broker URL is required/);
 });
