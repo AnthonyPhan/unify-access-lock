@@ -132,7 +132,7 @@ docker compose up -d --build
 
 Then add the MQTT integration in Home Assistant using broker `127.0.0.1`, port `1883`, and the `HOME_ASSISTANT_MQTT_*` credentials in `deploy/.env`. MQTT discovery is enabled by default. Open Doorstate at `http://<host>:8080`, complete UniFi setup, enable **Publish Home Assistant entities**, and save.
 
-The generated `.env`, Mosquitto password database, broker data, and Doorstate runtime configuration are excluded from Git. The public repository contains only deployment definitions and examples.
+The generated `.env`, Mosquitto password database, broker data, and Doorstate runtime configuration are excluded from Git. The plaintext `.env` is owner-only; the hashed password database grants read access only to Mosquitto's container group. The public repository contains only deployment definitions and examples.
 
 ## Raspberry Pi systemd install
 

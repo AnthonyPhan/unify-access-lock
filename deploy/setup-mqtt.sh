@@ -49,7 +49,14 @@ docker run --rm \
   eclipse-mosquitto:2 \
   mosquitto_passwd -b /mosquitto-config/passwd doorstate "${doorstate_password}"
 
-chmod 600 "${environment_file}" "${password_file}"
+docker run --rm \
+  --entrypoint sh \
+  -v "${deployment_dir}/mosquitto/config:/mosquitto-config" \
+  -v "${deployment_dir}/mosquitto/data:/mosquitto-data" \
+  eclipse-mosquitto:2 \
+  -c "chown $(id -u):1883 /mosquitto-config/passwd && chmod 640 /mosquitto-config/passwd && chown -R 1883:1883 /mosquitto-data && chmod 700 /mosquitto-data"
+
+chmod 600 "${environment_file}"
 
 echo "MQTT credentials created in ${environment_file}."
 echo "The file and Mosquitto password database are ignored by Git."
