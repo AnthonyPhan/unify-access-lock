@@ -141,6 +141,24 @@ test("honors the configured open-to-lock delay", async () => {
   assert.deepEqual(calls, ["door-1"]);
 });
 
+test("reports the current relock deadline and shortens it after a fresh open", async () => {
+  let currentTime = 1_000;
+  const { controller } = setup({
+    openLockDelayMs: 250,
+    nativeTriggerMs: 1_000,
+    nativeTriggerSafetyMs: 250,
+    now: () => currentTime,
+  });
+
+  await controller.handle(event("access.door.unlock"));
+  assert.equal(controller.snapshot()[0].unlockedAt, 1_000);
+  assert.equal(controller.snapshot()[0].relockAt, 61_000);
+
+  currentTime = 1_100;
+  await controller.handle(event("access.device.dps_status", "open"));
+  assert.equal(controller.snapshot()[0].relockAt, 2_500);
+});
+
 test("does not lock on a close event before the door opens", async () => {
   const { calls, controller, timers } = setup();
   await controller.handle(event("access.door.unlock"));

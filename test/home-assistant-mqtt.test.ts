@@ -45,6 +45,7 @@ test("publishes native Home Assistant service and door entities", () => {
 
   assert.ok(topics.includes("homeassistant/binary_sensor/door-1/door/config"));
   assert.ok(topics.includes("homeassistant/button/door-1/lock_now/config"));
+  assert.ok(topics.includes("homeassistant/sensor/door-1/relock_at/config"));
   assert.ok(topics.includes("homeassistant/switch/doorstate/automatic_relocking/config"));
   assert.ok(topics.includes("homeassistant/number/doorstate/maximum_unlock_time/config"));
   assert.equal(topics.some((topic) => topic.startsWith("homeassistant/lock/")), false);
@@ -59,12 +60,13 @@ test("publishes native Home Assistant service and door entities", () => {
   });
 });
 
-test("only publishes a remote-unlock lock entity after explicit opt-in", () => {
+test("only publishes a momentary remote-unlock button after explicit opt-in", () => {
   const entities = buildDiscoveryEntities(snapshot, config(true));
-  const lock = entities.find((entity) => entity.topic === "homeassistant/lock/door-1/lock/config");
-  assert.ok(lock);
-  assert.equal(lock.payload.command_topic, "doorstate/doors/door-1/lock/set");
-  assert.equal(lock.payload.payload_unlock, "UNLOCK");
+  const unlock = entities.find((entity) => entity.topic === "homeassistant/button/door-1/unlock/config");
+  assert.ok(unlock);
+  assert.equal(unlock.payload.command_topic, "doorstate/doors/door-1/unlock/press");
+  assert.equal(unlock.payload.payload_press, "PRESS");
+  assert.equal(entities.some((entity) => entity.topic.startsWith("homeassistant/lock/")), false);
 });
 
 test("does not place broker credentials in discovery payloads", () => {
@@ -117,13 +119,42 @@ test("connects, publishes discovery and serializes Home Assistant commands", asy
     "doorstate/service/+/set",
     "doorstate/doors/+/+/+",
   ]);
-  assert.ok(client.publications.some((item) => item.topic === "homeassistant/lock/door-1/lock/config"));
-  assert.ok(client.publications.some((item) => item.topic === "doorstate/doors/door-1/state"));
+  assert.ok(client.publications.some((item) => item.topic === "homeassistant/button/door-1/unlock/config"));
+  assert.ok(client.publications.some((item) => (
+    item.topic === "homeassistant/lock/door-1/lock/config" && item.payload === ""
+  )));
+  const doorState = client.publications.find((item) => item.topic === "doorstate/doors/door-1/state");
+  assert.ok(doorState);
+  assert.equal(JSON.parse(doorState.payload).relock_at, null);
 
   client.emit("message", "doorstate/service/automation/set", Buffer.from("OFF"));
-  client.emit("message", "doorstate/doors/door-1/lock/set", Buffer.from("UNLOCK"));
+  client.emit("message", "doorstate/doors/door-1/unlock/press", Buffer.from("PRESS"));
   await new Promise(setImmediate);
   await new Promise(setImmediate);
   assert.deepEqual(changes, [{ automationEnabled: false }]);
   assert.deepEqual(doorCommands, [{ doorId: "door-1", command: "unlock" }]);
+});
+
+test("publishes the controller's active relock deadline as a timestamp", () => {
+  const client = new FakeMqttClient();
+  const relockAt = Date.parse("2026-08-19T12:01:00.000Z");
+  const armedSnapshot = {
+    ...snapshot,
+    doors: snapshot.doors.map((door) => ({ ...door, relay: "unlock" })),
+    armedDoors: [{ doorId: "door-1", unlockedAt: relockAt - 60_000, relockAt }],
+  };
+  const bridge = new HomeAssistantMqttBridge({
+    logger: { info() {}, warn() {}, error() {} },
+    getRuntimeSnapshot: () => armedSnapshot,
+    onOperationalChange: async () => {},
+    onDoorCommand: async () => {},
+    connectClient: ((_url: string, _options: IClientOptions) => client) as unknown as typeof connect,
+  });
+
+  bridge.configure(config(true));
+  client.emit("connect");
+
+  const doorState = client.publications.find((item) => item.topic === "doorstate/doors/door-1/state");
+  assert.ok(doorState);
+  assert.equal(JSON.parse(doorState.payload).relock_at, "2026-08-19T12:01:00.000Z");
 });

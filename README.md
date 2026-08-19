@@ -113,7 +113,7 @@ Home Assistant OS and Home Assistant Supervised users can run this repository as
 3. Install **Doorstate** from **Local apps**, start it, and select **Open Web UI**.
 4. Configure the UniFi webhook as `http://<home-assistant-host>:8080/webhooks/unifi`; do not use the authenticated ingress URL as the webhook destination.
 
-The app requests Home Assistant's MQTT service and automatically receives its broker credentials from Supervisor. Once **Publish Home Assistant entities** is enabled, Doorstate creates native devices containing DPS, relay, relock-state, diagnostic, lock-now and configuration entities. Remote unlock remains disabled until separately opted in.
+The app requests Home Assistant's MQTT service and automatically receives its broker credentials from Supervisor. Once **Publish Home Assistant entities** is enabled, Doorstate creates native devices containing DPS, relay, relock-state, relock-deadline, diagnostic, lock-now and configuration entities. Remote unlock remains disabled until separately opted in; when enabled it is exposed as a momentary **Unlock** button rather than a persistent lock-state slider.
 
 MQTT mirrors state and carries user commands only. The safety-critical UniFi webhook → Doorstate controller → UniFi API path does not pass through Home Assistant or MQTT, so broker or Core restarts do not interrupt automatic relocking.
 

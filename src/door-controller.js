@@ -202,6 +202,9 @@ export class DoorController {
       doorId: door.id,
       doorName: door.name,
       currentPosition,
+      unlockedAt: unlockObservedAt,
+      timeoutAt: unlockObservedAt + this.lockTimeoutMs,
+      relockAt: unlockObservedAt + this.lockTimeoutMs,
       // The snapshot is only a baseline. It may be stale, inverted, or reflect
       // a door that was already open before this unlock. Only a fresh DPS
       // transition after the unlock is allowed to trigger an early relock.
@@ -279,6 +282,8 @@ export class DoorController {
     const current = this.states.get(state.doorId);
     if (current?.generation !== state.generation || current.locking) return;
     if (reason === "opened" && !current.sawOpen) return;
+
+    current.relockAt = Math.min(current.timeoutAt, this.now() + delayMs);
 
     current.lockTimer = this.setTimer(() => {
       current.lockTimer = undefined;
@@ -363,6 +368,8 @@ export class DoorController {
       position: state.currentPosition ?? "unknown",
       sawOpen: state.sawOpen,
       locking: state.locking,
+      unlockedAt: state.unlockedAt,
+      relockAt: state.relockAt,
     }));
   }
 

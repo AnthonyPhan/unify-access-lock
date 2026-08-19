@@ -20,6 +20,8 @@ type Door = {
 type ArmedDoor = {
   doorId: string;
   locking?: boolean;
+  unlockedAt?: number;
+  relockAt?: number;
 };
 
 export type RuntimeSnapshot = {
@@ -259,6 +261,15 @@ export function buildDiscoveryEntities(
         },
       },
       {
+        topic: `${discoveryPrefix}/sensor/${objectId}/relock_at/config`,
+        payload: {
+          ...commonEntity(`doorstate_${door.id}_relock_at`, "Relocks at", stateTopic, availabilityTopic, device),
+          device_class: "timestamp",
+          value_template: "{{ value_json.relock_at or 'unknown' }}",
+          icon: "mdi:timer-lock-outline",
+        },
+      },
+      {
         topic: `${discoveryPrefix}/button/${objectId}/lock_now/config`,
         payload: {
           unique_id: `doorstate_${door.id}_lock_now`,
@@ -277,16 +288,18 @@ export function buildDiscoveryEntities(
 
     if (allowUnlock) {
       entities.push({
-        topic: `${discoveryPrefix}/lock/${objectId}/lock/config`,
+        topic: `${discoveryPrefix}/button/${objectId}/unlock/config`,
         payload: {
-          ...commonEntity(`doorstate_${door.id}_lock`, null, stateTopic, availabilityTopic, device),
-          command_topic: `${topicPrefix}/doors/${objectId}/lock/set`,
-          value_template: "{{ value_json.relay }}",
-          payload_lock: "LOCK",
-          payload_unlock: "UNLOCK",
-          state_locked: "lock",
-          state_unlocked: "unlock",
-          icon: "mdi:gate",
+          unique_id: `doorstate_${door.id}_unlock`,
+          name: "Unlock",
+          command_topic: `${topicPrefix}/doors/${objectId}/unlock/press`,
+          payload_press: "PRESS",
+          availability_topic: availabilityTopic,
+          payload_available: "online",
+          payload_not_available: "offline",
+          device,
+          origin: ORIGIN,
+          icon: "mdi:gate-open",
         },
       });
     }
@@ -461,6 +474,14 @@ export class HomeAssistantMqttBridge {
     for (const entity of entities) {
       this.publish(entity.topic, JSON.stringify(entity.payload), true, 1);
     }
+    for (const door of this.snapshotValue.doors ?? []) {
+      this.publish(
+        `${this.config.mqtt.discoveryPrefix}/lock/${safeId(door.id)}/lock/config`,
+        "",
+        true,
+        1,
+      );
+    }
     this.discoveryTopics = desired;
   }
 
@@ -501,6 +522,8 @@ export class HomeAssistantMqttBridge {
         position: door.position === "closed" ? "close" : door.position ?? "unknown",
         relay: door.relay ?? "unknown",
         automation_state: automationState,
+        unlocked_at: isoTime(armedDoor?.unlockedAt),
+        relock_at: isoTime(armedDoor?.relockAt),
         last_event: door.lastEvent ?? "unknown",
         last_event_at: isoTime(door.lastEventAt),
       }), true, 1);
@@ -545,6 +568,11 @@ export class HomeAssistantMqttBridge {
 
       if (control === "lock_now" && action === "press" && payload === "PRESS") {
         await this.onDoorCommand(door.id, "lock");
+        return;
+      }
+      if (control === "unlock" && action === "press" && payload === "PRESS") {
+        if (!this.config.mqtt.allowUnlock) throw new Error("MQTT unlock controls are disabled");
+        await this.onDoorCommand(door.id, "unlock");
         return;
       }
       if (control === "lock" && action === "set") {
