@@ -1,5 +1,6 @@
 const PATCH_FLAG = Symbol.for("doorstate.frontGateCountdownPatched");
-const TIMER = Symbol.for("doorstate.frontGateCountdownTimer");
+const ACTIVE_DIALOGS = new Set();
+let animationFrame;
 
 function formatRemaining(milliseconds) {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -69,7 +70,6 @@ function ensureIndicator(host) {
       .doorstate-relock-progress {
         stroke: currentColor;
         stroke-linecap: round;
-        transition: stroke-dashoffset 240ms linear;
       }
       .doorstate-relock-label {
         position: absolute;
@@ -139,24 +139,41 @@ function updateCountdown(host) {
   const circle = indicator.querySelector(".doorstate-relock-progress");
   circle.setAttribute("stroke-dasharray", String(circumference));
   circle.setAttribute("stroke-dashoffset", String(circumference * (1 - progress)));
-  indicator.querySelector(".doorstate-relock-label").textContent = formatRemaining(remaining);
+  const label = indicator.querySelector(".doorstate-relock-label");
+  const nextLabel = formatRemaining(remaining);
+  if (label.textContent !== nextLabel) {
+    label.textContent = nextLabel;
+  }
+}
+
+function animateCountdowns() {
+  for (const host of ACTIVE_DIALOGS) {
+    if (!host.isConnected) {
+      ACTIVE_DIALOGS.delete(host);
+      continue;
+    }
+    updateCountdown(host);
+  }
+
+  animationFrame = ACTIVE_DIALOGS.size
+    ? window.requestAnimationFrame(animateCountdowns)
+    : undefined;
 }
 
 function startCountdown(host) {
-  if (host[TIMER]) {
-    return;
+  ACTIVE_DIALOGS.add(host);
+  updateCountdown(host);
+  if (animationFrame === undefined) {
+    animationFrame = window.requestAnimationFrame(animateCountdowns);
   }
-  const tick = () => updateCountdown(host);
-  window.requestAnimationFrame(tick);
-  host[TIMER] = window.setInterval(tick, 250);
 }
 
 function stopCountdown(host) {
-  if (!host[TIMER]) {
-    return;
+  ACTIVE_DIALOGS.delete(host);
+  if (!ACTIVE_DIALOGS.size && animationFrame !== undefined) {
+    window.cancelAnimationFrame(animationFrame);
+    animationFrame = undefined;
   }
-  window.clearInterval(host[TIMER]);
-  delete host[TIMER];
 }
 
 function findLockDialogs(root = document) {
