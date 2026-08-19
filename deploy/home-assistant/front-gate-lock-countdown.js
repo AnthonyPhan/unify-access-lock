@@ -1,13 +1,5 @@
-const TARGET_LOCK = "lock.gate_controller";
-const RELOCK_AT_ENTITY = "sensor.gate_controller_relocks_at";
-const MAXIMUM_UNLOCK_ENTITY = "number.doorstate_maximum_unlock_time";
-
 const PATCH_FLAG = Symbol.for("doorstate.frontGateCountdownPatched");
 const TIMER = Symbol.for("doorstate.frontGateCountdownTimer");
-
-function homeAssistant() {
-  return document.querySelector("home-assistant")?.hass;
-}
 
 function formatRemaining(milliseconds) {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -35,6 +27,9 @@ function ensureIndicator(host) {
         position: relative;
         z-index: 2;
         transition: transform 180ms ease-in-out;
+      }
+      .button {
+        position: relative;
       }
       .button.doorstate-countdown-active > slot {
         transform: translateY(-9px);
@@ -111,7 +106,8 @@ function ensureIndicator(host) {
 }
 
 function updateCountdown(host) {
-  if (host.stateObj?.entity_id !== TARGET_LOCK) {
+  const attributes = host.stateObj?.attributes;
+  if (!attributes || !("relock_at" in attributes)) {
     return;
   }
 
@@ -121,12 +117,10 @@ function updateCountdown(host) {
   }
 
   const { indicator, thumb } = elements;
-  const hass = homeAssistant();
   const lockState = host.stateObj?.state;
-  const relockState = hass?.states?.[RELOCK_AT_ENTITY]?.state;
-  const relockAt = Date.parse(relockState ?? "");
+  const relockAt = Date.parse(attributes.relock_at ?? "");
   const remaining = relockAt - Date.now();
-  const maximumSeconds = Number(hass?.states?.[MAXIMUM_UNLOCK_ENTITY]?.state);
+  const maximumSeconds = Number(attributes.maximum_unlock_time);
   const duration = Number.isFinite(maximumSeconds) && maximumSeconds > 0
     ? maximumSeconds * 1000
     : 60_000;

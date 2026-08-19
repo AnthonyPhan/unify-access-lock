@@ -65,6 +65,7 @@ test("only publishes the native lock slider after explicit remote-unlock opt-in"
   const lock = entities.find((entity) => entity.topic === "homeassistant/lock/door-1/lock/config");
   assert.ok(lock);
   assert.equal(lock.payload.command_topic, "doorstate/doors/door-1/lock/set");
+  assert.equal(lock.payload.json_attributes_topic, "doorstate/doors/door-1/state");
   assert.equal(lock.payload.payload_lock, "LOCK");
   assert.equal(lock.payload.payload_unlock, "UNLOCK");
   assert.equal(entities.some((entity) => entity.topic.includes("/button/door-1/unlock/")), false);
@@ -158,4 +159,5 @@ test("publishes the controller's active relock deadline as a timestamp", () => {
   const doorState = client.publications.find((item) => item.topic === "doorstate/doors/door-1/state");
   assert.ok(doorState);
   assert.equal(JSON.parse(doorState.payload).relock_at, "2026-08-19T12:01:00.000Z");
+  assert.equal(JSON.parse(doorState.payload).maximum_unlock_time, 60);
 });

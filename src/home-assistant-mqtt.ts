@@ -293,6 +293,7 @@ export function buildDiscoveryEntities(
           ...commonEntity(`doorstate_${door.id}_lock`, null, stateTopic, availabilityTopic, device),
           command_topic: `${topicPrefix}/doors/${objectId}/lock/set`,
           value_template: "{{ value_json.relay }}",
+          json_attributes_topic: stateTopic,
           payload_lock: "LOCK",
           payload_unlock: "UNLOCK",
           state_locked: "lock",
@@ -522,6 +523,7 @@ export class HomeAssistantMqttBridge {
         automation_state: automationState,
         unlocked_at: isoTime(armedDoor?.unlockedAt),
         relock_at: isoTime(armedDoor?.relockAt),
+        maximum_unlock_time: settings.lockTimeoutMs / 1_000,
         last_event: door.lastEvent ?? "unknown",
         last_event_at: isoTime(door.lastEventAt),
       }), true, 1);
