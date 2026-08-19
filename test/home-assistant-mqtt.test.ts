@@ -60,13 +60,14 @@ test("publishes native Home Assistant service and door entities", () => {
   });
 });
 
-test("only publishes a momentary remote-unlock button after explicit opt-in", () => {
+test("only publishes the native lock slider after explicit remote-unlock opt-in", () => {
   const entities = buildDiscoveryEntities(snapshot, config(true));
-  const unlock = entities.find((entity) => entity.topic === "homeassistant/button/door-1/unlock/config");
-  assert.ok(unlock);
-  assert.equal(unlock.payload.command_topic, "doorstate/doors/door-1/unlock/press");
-  assert.equal(unlock.payload.payload_press, "PRESS");
-  assert.equal(entities.some((entity) => entity.topic.startsWith("homeassistant/lock/")), false);
+  const lock = entities.find((entity) => entity.topic === "homeassistant/lock/door-1/lock/config");
+  assert.ok(lock);
+  assert.equal(lock.payload.command_topic, "doorstate/doors/door-1/lock/set");
+  assert.equal(lock.payload.payload_lock, "LOCK");
+  assert.equal(lock.payload.payload_unlock, "UNLOCK");
+  assert.equal(entities.some((entity) => entity.topic.includes("/button/door-1/unlock/")), false);
 });
 
 test("does not place broker credentials in discovery payloads", () => {
@@ -119,16 +120,16 @@ test("connects, publishes discovery and serializes Home Assistant commands", asy
     "doorstate/service/+/set",
     "doorstate/doors/+/+/+",
   ]);
-  assert.ok(client.publications.some((item) => item.topic === "homeassistant/button/door-1/unlock/config"));
+  assert.ok(client.publications.some((item) => item.topic === "homeassistant/lock/door-1/lock/config" && item.payload !== ""));
   assert.ok(client.publications.some((item) => (
-    item.topic === "homeassistant/lock/door-1/lock/config" && item.payload === ""
+    item.topic === "homeassistant/button/door-1/unlock/config" && item.payload === ""
   )));
   const doorState = client.publications.find((item) => item.topic === "doorstate/doors/door-1/state");
   assert.ok(doorState);
   assert.equal(JSON.parse(doorState.payload).relock_at, null);
 
   client.emit("message", "doorstate/service/automation/set", Buffer.from("OFF"));
-  client.emit("message", "doorstate/doors/door-1/unlock/press", Buffer.from("PRESS"));
+  client.emit("message", "doorstate/doors/door-1/lock/set", Buffer.from("UNLOCK"));
   await new Promise(setImmediate);
   await new Promise(setImmediate);
   assert.deepEqual(changes, [{ automationEnabled: false }]);

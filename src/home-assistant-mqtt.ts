@@ -288,18 +288,16 @@ export function buildDiscoveryEntities(
 
     if (allowUnlock) {
       entities.push({
-        topic: `${discoveryPrefix}/button/${objectId}/unlock/config`,
+        topic: `${discoveryPrefix}/lock/${objectId}/lock/config`,
         payload: {
-          unique_id: `doorstate_${door.id}_unlock`,
-          name: "Unlock",
-          command_topic: `${topicPrefix}/doors/${objectId}/unlock/press`,
-          payload_press: "PRESS",
-          availability_topic: availabilityTopic,
-          payload_available: "online",
-          payload_not_available: "offline",
-          device,
-          origin: ORIGIN,
-          icon: "mdi:gate-open",
+          ...commonEntity(`doorstate_${door.id}_lock`, null, stateTopic, availabilityTopic, device),
+          command_topic: `${topicPrefix}/doors/${objectId}/lock/set`,
+          value_template: "{{ value_json.relay }}",
+          payload_lock: "LOCK",
+          payload_unlock: "UNLOCK",
+          state_locked: "lock",
+          state_unlocked: "unlock",
+          icon: "mdi:gate",
         },
       });
     }
@@ -476,7 +474,7 @@ export class HomeAssistantMqttBridge {
     }
     for (const door of this.snapshotValue.doors ?? []) {
       this.publish(
-        `${this.config.mqtt.discoveryPrefix}/lock/${safeId(door.id)}/lock/config`,
+        `${this.config.mqtt.discoveryPrefix}/button/${safeId(door.id)}/unlock/config`,
         "",
         true,
         1,
